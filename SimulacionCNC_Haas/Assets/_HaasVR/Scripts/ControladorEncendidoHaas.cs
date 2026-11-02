@@ -40,7 +40,7 @@ public class ControladorEncendidoHaas : MonoBehaviour
     public UnityEngine.XR.Interaction.Toolkit.XRBaseInteractable interactableManijaIzq;
     public Transform puertaIzquierda;
     public Transform puertaDerecha;
-    public float distanciaApertura = 0.28f; // Positivo o negativo según hacia dónde abra
+    public float distanciaApertura = 0.28f; 
     public bool sincronizarPuertasEnEspejo = true;
 
     private Transform padreOriginalIzq;
@@ -56,12 +56,24 @@ public class ControladorEncendidoHaas : MonoBehaviour
 
 
 
-    [Header("7. Ejes y Cubiertas Telescópicas (Home)")]
+
+
+    [Header("7. Ejes y Cubiertas Telescópicas (Home en Ejes de Unity)")]
     public Transform cabezalEjeZ;
+    public Transform[] placasTelescopicasCabezal; // De arriba (pegada al cabezal) hacia abajo
+    public float desplazamientoCabezalHomeY = 0.18f; // Flecha Verde en Unity (Subir cabezal)
+
     public Transform mesaEjeX;
-    public Transform[] placasTelescopicasZ;
-    public float alturaZHome = 1.05f;
-    public float alturaZBaseFija = 0.22f;
+    public Transform[] placasInferioresMesa; // De arriba (bajo la mesa) hacia abajo
+    public float desplazamientoMesaHomeX = 0.25f; // Flecha Roja en Unity (Mover mesa a la izq)
+    public float desplazamientoMesaHomeZ = 0.10f; // Flecha Azul en Unity (Mover mesa y placas abajo)
+
+    private Vector3 posIniCabezal;
+    private Vector3[] posIniPlacasCabezal;
+    private Vector3 posIniMesa;
+    private Vector3[] posIniPlacasMesa;
+
+
 
     [Header("Audio (Opcional)")]
     public AudioSource audioSource;
@@ -95,6 +107,25 @@ public class ControladorEncendidoHaas : MonoBehaviour
             rendererPantallaCNC.material = matPantallaApagada;
 
         ActualizarTextoGuia("Paso 1: Ve atrás de la máquina y sube el interruptor MAIN POWER a ON.");
+
+        // Guardar posiciones iniciales exactas del cabezal, mesa y placaas para mover sin desajustar ejes
+        if (cabezalEjeZ != null) posIniCabezal = cabezalEjeZ.localPosition;
+        if (placasTelescopicasCabezal != null)
+        {
+            posIniPlacasCabezal = new Vector3[placasTelescopicasCabezal.Length];
+            for (int i = 0; i < placasTelescopicasCabezal.Length; i++)
+                if (placasTelescopicasCabezal[i] != null)
+                    posIniPlacasCabezal[i] = placasTelescopicasCabezal[i].localPosition;
+        }
+
+        if (mesaEjeX != null) posIniMesa = mesaEjeX.localPosition;
+        if (placasInferioresMesa != null)
+        {
+            posIniPlacasMesa = new Vector3[placasInferioresMesa.Length];
+            for (int i = 0; i < placasInferioresMesa.Length; i++)
+                if (placasInferioresMesa[i] != null)
+                    posIniPlacasMesa[i] = placasInferioresMesa[i].localPosition;
+        }
     }
 
     private void AlAgarrarManija(UnityEngine.XR.Interaction.Toolkit.SelectEnterEventArgs args)
@@ -119,7 +150,7 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (puertaIzquierda.parent != padreOriginalIzq)
             puertaIzquierda.SetParent(padreOriginalIzq, false);
 
-        // 1. Calcular cuánto movió la mano el jugador a lo largo del eje horizontal de la máquina
+        // Calcular cuánto movió la mano el jugador a lo largo del eje horizontal de la máquina
         if (interactorManija != null && interactorManija.transform != null)
         {
             Vector3 desplazamientoMano = interactorManija.transform.position - posManoInicialMundo;
@@ -132,14 +163,14 @@ public class ControladorEncendidoHaas : MonoBehaviour
             aperturaActual = Mathf.Clamp(aperturaAlAgarrar + deltaRiel, minLim, maxLim);
         }
 
-        // 2. Aplicar posición exacta sobre el riel local (nunca se sale de Y ni de Z)
+        // Aplicar posición exacta sobre el riel local (nunca se sale de Y ni de Z)
         puertaIzquierda.localPosition = new Vector3(
             posCerradaIzq.x + aperturaActual,
             posCerradaIzq.y,
             posCerradaIzq.z
         );
 
-        // 3. Mover Puerta Derecha en sentido opuesto (espejo)
+        // Mover Puerta Derecha en sentido opuesto (espejo)
         if (sincronizarPuertasEnEspejo && puertaDerecha != null)
         {
             puertaDerecha.localPosition = new Vector3(
@@ -176,7 +207,7 @@ public class ControladorEncendidoHaas : MonoBehaviour
     {
         if (pasoActual != PasoEncendido.Paso1_SubirBreakerTrasero) return;
         if (palancaMainPower != null)
-            StartCoroutine(RotarSuave(palancaMainPower, Quaternion.Euler(-55f, 0f, 0f), 0.25f));
+            StartCoroutine(RotarSuave(palancaMainPower, Quaternion.Euler(90f, 0f, 0f), 0.25f));
 
         ReproducirSonido(sonidoBreaker);
         pasoActual = PasoEncendido.Paso2_AbrirValvulaAire;
@@ -188,9 +219,9 @@ public class ControladorEncendidoHaas : MonoBehaviour
     {
         if (pasoActual != PasoEncendido.Paso2_AbrirValvulaAire) return;
         if (palancaValvulaAire != null)
-            StartCoroutine(RotarSuave(palancaValvulaAire, Quaternion.Euler(0f, 90f, 0f), 0.35f));
+            StartCoroutine(RotarSuave(palancaValvulaAire, Quaternion.Euler(-90f, 0f, 0f), 0.35f));
         if (agujaManometro != null)
-            StartCoroutine(RotarSuave(agujaManometro, Quaternion.Euler(0f, -65f, 0f), 0.6f));
+            StartCoroutine(RotarSuave(agujaManometro, Quaternion.Euler(-65f, 0f, 90f), 0.6f));
 
         ReproducirSonido(sonidoAire);
         pasoActual = PasoEncendido.Paso3_BotonPowerOn;
@@ -222,7 +253,11 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (botonEStop != null)
         {
             Vector3 posFinal = botonEStop.localPosition + new Vector3(0f, -0.015f, 0f);
-            StartCoroutine(MoverYRotarSuave(botonEStop, posFinal, Quaternion.Euler(0f, 45f, 0f), 0.25f));
+            // Rotación RELATIVA: multiplicamos la rotación actual por el ángulo deseado
+            Quaternion rotGiro = Quaternion.Euler(0f, 0f, 45f);
+            Quaternion rotFinal = botonEStop.localRotation * rotGiro;
+
+            StartCoroutine(MoverYRotarSuave(botonEStop, posFinal, rotFinal, 0.25f));
         }
 
         pasoActual = PasoEncendido.Paso5_CiclarPuertas;
@@ -248,17 +283,21 @@ public class ControladorEncendidoHaas : MonoBehaviour
         StartCoroutine(SecuenciaHomeEjes());
     }
 
+
+
     private IEnumerator SecuenciaHomeEjes()
     {
         ActualizarTextoGuia("Enviando ejes Z, X, Y a Origen (Home)...");
         float duracion = 2.5f;
         float t = 0f;
 
-        Vector3 zInicio = cabezalEjeZ != null ? cabezalEjeZ.localPosition : Vector3.zero;
-        Vector3 zFin = new Vector3(zInicio.x, zInicio.y, alturaZHome);
+        Vector3 cabInicio = cabezalEjeZ != null ? cabezalEjeZ.localPosition : Vector3.zero;
+        // En Unity el Cabezal sube en el eje Y (Flecha Verde)
+        Vector3 cabFin = posIniCabezal + new Vector3(0f, desplazamientoCabezalHomeY, 0f);
 
-        Vector3 xInicio = mesaEjeX != null ? mesaEjeX.localPosition : Vector3.zero;
-        Vector3 xFin = new Vector3(0f, xInicio.y, xInicio.z);
+        Vector3 mesaInicio = mesaEjeX != null ? mesaEjeX.localPosition : Vector3.zero;
+        // La mesa se mueve a la izquierda (Eje X) y hacia adelante/atrás (Eje Z)
+        Vector3 mesaFin = posIniMesa + new Vector3(desplazamientoMesaHomeX, 0f, desplazamientoMesaHomeZ);
 
         while (t < duracion)
         {
@@ -267,11 +306,17 @@ public class ControladorEncendidoHaas : MonoBehaviour
 
             if (cabezalEjeZ != null)
             {
-                cabezalEjeZ.localPosition = Vector3.Lerp(zInicio, zFin, progreso);
-                ActualizarCubiertasZ(cabezalEjeZ.localPosition.z);
+                cabezalEjeZ.localPosition = Vector3.Lerp(cabInicio, cabFin, progreso);
+                float deltaYActual = cabezalEjeZ.localPosition.y - posIniCabezal.y;
+                ActualizarCubiertasCabezal(deltaYActual);
             }
+
             if (mesaEjeX != null)
-                mesaEjeX.localPosition = Vector3.Lerp(xInicio, xFin, progreso);
+            {
+                mesaEjeX.localPosition = Vector3.Lerp(mesaInicio, mesaFin, progreso);
+                float deltaZActual = mesaEjeX.localPosition.z - posIniMesa.z;
+                ActualizarCubiertasMesa(deltaZActual);
+            }
 
             yield return null;
         }
@@ -280,18 +325,35 @@ public class ControladorEncendidoHaas : MonoBehaviour
         ActualizarTextoGuia("¡Encendido listo! Máquina Haas VF-2 en Origen.");
     }
 
-    public void ActualizarCubiertasZ(float zActualCabezal)
+    // Mueve las placas del cabezal solo en el eje vertical Y (Flecha Verde)
+    public void ActualizarCubiertasCabezal(float deltaY)
     {
-        if (placasTelescopicasZ == null || placasTelescopicasZ.Length == 0) return;
-        for (int i = 0; i < placasTelescopicasZ.Length; i++)
+        if (placasTelescopicasCabezal == null || posIniPlacasCabezal == null) return;
+        int n = placasTelescopicasCabezal.Length;
+        for (int i = 0; i < n; i++)
         {
-            if (placasTelescopicasZ[i] == null) continue;
-            float factor = (float)i / (placasTelescopicasZ.Length - 1);
-            Vector3 p = placasTelescopicasZ[i].localPosition;
-            p.z = Mathf.Lerp(zActualCabezal, alturaZBaseFija, factor);
-            placasTelescopicasZ[i].localPosition = p;
+            if (placasTelescopicasCabezal[i] == null) continue;
+            // La placa 0 (arriba) se mueve el 100% con el cabezal; la última (abajo) se mueve 0%
+            float peso = (n > 1) ? 1f - ((float)i / (n - 1)) : 1f;
+            placasTelescopicasCabezal[i].localPosition = posIniPlacasCabezal[i] + new Vector3(0f, deltaY * peso, 0f);
         }
     }
+
+    // Mueve las placas debajo de la mesa en cascada en el eje Z (Flecha Azul)
+    public void ActualizarCubiertasMesa(float deltaZ)
+    {
+        if (placasInferioresMesa == null || posIniPlacasMesa == null) return;
+        int n = placasInferioresMesa.Length;
+        for (int i = 0; i < n; i++)
+        {
+            if (placasInferioresMesa[i] == null) continue;
+            // La placa superior bajo la mesa se mueve al 100%; la inferior queda fija en la base
+            float peso = (n > 1) ? 1f - ((float)i / (n - 1)) : 1f;
+            placasInferioresMesa[i].localPosition = posIniPlacasMesa[i] + new Vector3(0f, 0f, deltaZ * peso);
+        }
+    }
+
+
 
     private IEnumerator RotarSuave(Transform obj, Quaternion rotFinal, float duracion)
     {
