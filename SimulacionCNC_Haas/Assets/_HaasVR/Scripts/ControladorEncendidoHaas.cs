@@ -36,21 +36,25 @@ public class ControladorEncendidoHaas : MonoBehaviour
     public Transform botonEStop;
 
 
-    [Header("5. Doble Puerta de la Cabina (Deslizador Cinemático Sin Parpadeo)")]
-    public UnityEngine.XR.Interaction.Toolkit.XRGrabInteractable grabPuertaIzquierda;
+    [Header("5. Doble Puerta de la Cabina (Con XR Simple Interactable)")]
+    public UnityEngine.XR.Interaction.Toolkit.XRBaseInteractable interactableManijaIzq;
     public Transform puertaIzquierda;
     public Transform puertaDerecha;
-    public float distanciaApertura = 0.28f; // Positivo si Izq abre hacia -X, negativo si abre hacia +X
+    public float distanciaApertura = 0.28f; // Positivo o negativo según hacia dónde abra
     public bool sincronizarPuertasEnEspejo = true;
 
+    private Transform padreOriginalIzq;
     private Vector3 posCerradaIzq;
     private Vector3 posCerradaDer;
     private bool puertasFueronAbiertas = false;
 
-    // Variables para calcular el deslizamiento limpio con láser o mano
     private UnityEngine.XR.Interaction.Toolkit.IXRSelectInteractor interactorManija;
-    private float xManoInicial;
-    private float xPuertaAlAgarrar;
+    private Vector3 posManoInicialMundo;
+    private float aperturaAlAgarrar;
+    private float aperturaActual = 0f; // 0 = cerrada, distanciaApertura = abierta
+
+
+
 
     [Header("7. Ejes y Cubiertas Telescópicas (Home)")]
     public Transform cabezalEjeZ;
@@ -71,18 +75,20 @@ public class ControladorEncendidoHaas : MonoBehaviour
 
     private void Start()
     {
-        if (puertaIzquierda != null) posCerradaIzq = puertaIzquierda.localPosition;
-        if (puertaDerecha != null) posCerradaDer = puertaDerecha.localPosition;
-
-        if (grabPuertaIzquierda != null)
+        if (puertaIzquierda != null)
         {
-            // Evita que XR Toolkit mueva o desemparente la puerta por su cuenta
-            grabPuertaIzquierda.trackPosition = false;
-            grabPuertaIzquierda.trackRotation = false;
-            grabPuertaIzquierda.retainTransformParent = true;
+            padreOriginalIzq = puertaIzquierda.parent;
+            posCerradaIzq = puertaIzquierda.localPosition;
+        }
+        if (puertaDerecha != null)
+        {
+            posCerradaDer = puertaDerecha.localPosition;
+        }
 
-            grabPuertaIzquierda.selectEntered.AddListener(AlAgarrarManija);
-            grabPuertaIzquierda.selectExited.AddListener(AlSoltarManija);
+        if (interactableManijaIzq != null)
+        {
+            interactableManijaIzq.selectEntered.AddListener(AlAgarrarManija);
+            interactableManijaIzq.selectExited.AddListener(AlSoltarManija);
         }
 
         if (rendererPantallaCNC != null && matPantallaApagada != null)
@@ -96,11 +102,8 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (puertaIzquierda == null || args.interactorObject == null) return;
 
         interactorManija = args.interactorObject;
-        // Usamos el sistema de coordenadas seguro (el padre si existe, o este mismo objeto)
-        Transform espacioRef = puertaIzquierda.parent != null ? puertaIzquierda.parent : transform;
-
-        xManoInicial = espacioRef.InverseTransformPoint(interactorManija.transform.position).x;
-        xPuertaAlAgarrar = puertaIzquierda.localPosition.x;
+        posManoInicialMundo = interactorManija.transform.position;
+        aperturaAlAgarrar = aperturaActual;
     }
 
     private void AlSoltarManija(UnityEngine.XR.Interaction.Toolkit.SelectExitEventArgs args)
@@ -112,41 +115,50 @@ public class ControladorEncendidoHaas : MonoBehaviour
     {
         if (puertaIzquierda == null) return;
 
-        // 1. Si el jugador sujeta la manija, deslizar en X sin depender de .parent nulo
+        // Blindaje: si por alguna razón se desemparentó, devolverla a la máquina de inmediato
+        if (puertaIzquierda.parent != padreOriginalIzq)
+            puertaIzquierda.SetParent(padreOriginalIzq, false);
+
+        // 1. Calcular cuánto movió la mano el jugador a lo largo del eje horizontal de la máquina
         if (interactorManija != null && interactorManija.transform != null)
         {
-            Transform espacioRef = puertaIzquierda.parent != null ? puertaIzquierda.parent : transform;
-            float xManoActual = espacioRef.InverseTransformPoint(interactorManija.transform.position).x;
-            float deltaX = xManoActual - xManoInicial;
+            Vector3 desplazamientoMano = interactorManija.transform.position - posManoInicialMundo;
+            // Proyectamos el movimiento de la mano sobre el eje X de la máquina (transform.right)
+            float deltaRiel = Vector3.Dot(desplazamientoMano, transform.right);
 
-            float minX = Mathf.Min(posCerradaIzq.x, posCerradaIzq.x - distanciaApertura);
-            float maxX = Mathf.Max(posCerradaIzq.x, posCerradaIzq.x - distanciaApertura);
+            float minLim = Mathf.Min(0f, -distanciaApertura);
+            float maxLim = Mathf.Max(0f, -distanciaApertura);
 
-            float nuevoX = Mathf.Clamp(xPuertaAlAgarrar + deltaX, minX, maxX);
-            puertaIzquierda.localPosition = new Vector3(nuevoX, posCerradaIzq.y, posCerradaIzq.z);
+            aperturaActual = Mathf.Clamp(aperturaAlAgarrar + deltaRiel, minLim, maxLim);
         }
 
-        // 2. Mover la puerta derecha en espejo (solo si está asignada)
-        float desplazamientoIzq = Mathf.Abs(puertaIzquierda.localPosition.x - posCerradaIzq.x);
+        // 2. Aplicar posición exacta sobre el riel local (nunca se sale de Y ni de Z)
+        puertaIzquierda.localPosition = new Vector3(
+            posCerradaIzq.x + aperturaActual,
+            posCerradaIzq.y,
+            posCerradaIzq.z
+        );
+
+        // 3. Mover Puerta Derecha en sentido opuesto (espejo)
         if (sincronizarPuertasEnEspejo && puertaDerecha != null)
         {
-            float direccionEspejo = Mathf.Sign(distanciaApertura);
             puertaDerecha.localPosition = new Vector3(
-                posCerradaDer.x + (desplazamientoIzq * direccionEspejo),
+                posCerradaDer.x - aperturaActual,
                 posCerradaDer.y,
                 posCerradaDer.z
             );
         }
 
-        // 3. Verificación del Paso 5: Abrir y volver a cerrar las puertas
+        // 4. Validar Paso 5 (Abrir y volver a cerrar)
+        float distRecorrida = Mathf.Abs(aperturaActual);
         if (pasoActual == PasoEncendido.Paso5_CiclarPuertas)
         {
-            if (!puertasFueronAbiertas && desplazamientoIzq >= Mathf.Abs(distanciaApertura) * 0.7f)
+            if (!puertasFueronAbiertas && distRecorrida >= Mathf.Abs(distanciaApertura) * 0.7f)
             {
                 puertasFueronAbiertas = true;
                 ActualizarTextoGuia("Paso 5: ¡Puertas abiertas! Ahora vuelve a cerrarlas.");
             }
-            else if (puertasFueronAbiertas && desplazamientoIzq <= 0.04f)
+            else if (puertasFueronAbiertas && distRecorrida <= 0.04f)
             {
                 pasoActual = PasoEncendido.Paso6_ResetAlarmas;
                 ActualizarTextoGuia("Paso 6: Presiona la tecla naranja RESET en el panel de control.");
