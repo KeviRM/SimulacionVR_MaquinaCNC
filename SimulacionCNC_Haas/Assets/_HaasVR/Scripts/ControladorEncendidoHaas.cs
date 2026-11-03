@@ -20,9 +20,6 @@ public class ControladorEncendidoHaas : MonoBehaviour
     public PasoEncendido pasoActual = PasoEncendido.Paso1_SubirBreakerTrasero;
     public TMP_Text textoGuiaUI;
 
-
-
-
     [Header("1-2. Gabinete Trasero (Breaker y Aire)")]
     public Transform palancaMainPower;
     public Transform palancaValvulaAire;
@@ -35,6 +32,13 @@ public class ControladorEncendidoHaas : MonoBehaviour
     public Material matPantallaLista;
     public Transform botonEStop;
 
+    [Header("Torreta / Foco Superior de Alarma")]
+    public MeshRenderer focoTorretaRenderer; // Opcional: El cilindro blanco superior del gabinete
+    public Light luzPuntualTorreta;          // Tu objeto LuzAlerta (Point Light roja)
+    public Color colorTorretaAlarma = new Color(1f, 0.05f, 0.05f);
+    public Color colorTorretaLista = new Color(0.05f, 0.9f, 0.15f);
+    private Color colorOriginalTorreta = Color.white;
+    private bool alarmasActivasTorreta = false;
 
     [Header("5. Doble Puerta de la Cabina (Con XR Simple Interactable)")]
     public UnityEngine.XR.Interaction.Toolkit.XRBaseInteractable interactableManijaIzq;
@@ -51,39 +55,53 @@ public class ControladorEncendidoHaas : MonoBehaviour
     private UnityEngine.XR.Interaction.Toolkit.IXRSelectInteractor interactorManija;
     private Vector3 posManoInicialMundo;
     private float aperturaAlAgarrar;
-    private float aperturaActual = 0f; // 0 = cerrada, distanciaApertura = abierta
+    private float aperturaActual = 0f;
 
+    [Header("6. Sistema de 4 Alarmas en Botón RESET")]
+    public int pulsacionesResetNecesarias = 4;
+    private int pulsacionesResetActuales = 0;
+    private readonly string[] nombresAlarmasHaas = new string[]
+    {
+        "ALARMA 1/4: [102] SERVOS OFF",
+        "ALARMA 2/4: [101] DOOR HOLD / INTERLOCK",
+        "ALARMA 3/4: [123] LOW LUBE / SPINDLE DRIVE",
+        "ALARMA 4/4: [161] AXES NOT ZEROED"
+    };
 
-
-
-
+    private Transform objetivoActualGuia;
+    private Renderer rendererObjetivoActual;
+    private Color colorOriginalObjetivo = Color.white;
 
     [Header("7. Ejes y Cubiertas Telescópicas (Home en Ejes de Unity)")]
     public Transform cabezalEjeZ;
-    public Transform[] placasTelescopicasCabezal; // De arriba (pegada al cabezal) hacia abajo
-    public float desplazamientoCabezalHomeY = 0.18f; // Flecha Verde en Unity (Subir cabezal)
+    public Transform[] placasTelescopicasCabezal;
+    public float desplazamientoCabezalHomeY = 0.18f;
 
     public Transform mesaEjeX;
-    public Transform[] placasInferioresMesa; // De arriba (bajo la mesa) hacia abajo
-    public float desplazamientoMesaHomeX = 0.25f; // Flecha Roja en Unity (Mover mesa a la izq)
-    public float desplazamientoMesaHomeZ = 0.10f; // Flecha Azul en Unity (Mover mesa y placas abajo)
+    public Transform[] placasInferioresMesa;
+    public float desplazamientoMesaHomeX = 0.25f;
+    public float desplazamientoMesaHomeZ = 0.10f;
 
     private Vector3 posIniCabezal;
     private Vector3[] posIniPlacasCabezal;
     private Vector3 posIniMesa;
     private Vector3[] posIniPlacasMesa;
 
+    [Header("8. Ayuda Visual (Flecha y Parpadeo de Botones)")]
+    public Transform flechaGuia3D;
+    public Vector3 offsetFlecha = new Vector3(0f, 0.15f, 0f);
+    public Transform botonPowerOnRef;
+    public Transform botonResetRef;
+    public Transform botonPowerUpRestartRef;
+    public Color colorResaltadoBoton = new Color(1f, 0.85f, 0f);
 
-
-    [Header("Audio (Opcional)")]
+    [Header("Audio")]
     public AudioSource audioSource;
     public AudioClip sonidoBreaker;
     public AudioClip sonidoAire;
     public AudioClip sonidoVentiladorLoop;
+    public AudioClip sonidoBeepBoton;
     public AudioClip sonidoServosHome;
-
-
-
 
     private void Start()
     {
@@ -106,9 +124,14 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (rendererPantallaCNC != null && matPantallaApagada != null)
             rendererPantallaCNC.material = matPantallaApagada;
 
-        ActualizarTextoGuia("Paso 1: Ve atrás de la máquina y sube el interruptor MAIN POWER a ON.");
+        // Asegurar que la torreta y LuzAlerta inicien APAGADAS hasta presionar Power On
+        alarmasActivasTorreta = false;
+        if (focoTorretaRenderer != null && focoTorretaRenderer.material != null && focoTorretaRenderer.material.HasProperty("_Color"))
+            colorOriginalTorreta = focoTorretaRenderer.material.color;
+        if (luzPuntualTorreta != null)
+            luzPuntualTorreta.enabled = false;
 
-        // Guardar posiciones iniciales exactas del cabezal, mesa y placaas para mover sin desajustar ejes
+        // Guardar posiciones iniciales exactas del cabezal, mesa y placas
         if (cabezalEjeZ != null) posIniCabezal = cabezalEjeZ.localPosition;
         if (placasTelescopicasCabezal != null)
         {
@@ -126,6 +149,9 @@ public class ControladorEncendidoHaas : MonoBehaviour
                 if (placasInferioresMesa[i] != null)
                     posIniPlacasMesa[i] = placasInferioresMesa[i].localPosition;
         }
+
+        CambiarObjetivoGuia(palancaMainPower);
+        ActualizarTextoGuia("Paso 1: Ve atrás de la máquina y sube el interruptor MAIN POWER a ON.");
     }
 
     private void AlAgarrarManija(UnityEngine.XR.Interaction.Toolkit.SelectEnterEventArgs args)
@@ -144,17 +170,17 @@ public class ControladorEncendidoHaas : MonoBehaviour
 
     private void Update()
     {
+        // ¡AQUÍ FALTABA LLAMAR A LA FUNCIÓN DE LA FLECHA Y LA LUZ!
+        AnimarAyudasVisualesYTorreta();
+
         if (puertaIzquierda == null) return;
 
-        // Blindaje: si por alguna razón se desemparentó, devolverla a la máquina de inmediato
         if (puertaIzquierda.parent != padreOriginalIzq)
             puertaIzquierda.SetParent(padreOriginalIzq, false);
 
-        // Calcular cuánto movió la mano el jugador a lo largo del eje horizontal de la máquina
         if (interactorManija != null && interactorManija.transform != null)
         {
             Vector3 desplazamientoMano = interactorManija.transform.position - posManoInicialMundo;
-            // Proyectamos el movimiento de la mano sobre el eje X de la máquina (transform.right)
             float deltaRiel = Vector3.Dot(desplazamientoMano, transform.right);
 
             float minLim = Mathf.Min(0f, -distanciaApertura);
@@ -163,14 +189,12 @@ public class ControladorEncendidoHaas : MonoBehaviour
             aperturaActual = Mathf.Clamp(aperturaAlAgarrar + deltaRiel, minLim, maxLim);
         }
 
-        // Aplicar posición exacta sobre el riel local (nunca se sale de Y ni de Z)
         puertaIzquierda.localPosition = new Vector3(
             posCerradaIzq.x + aperturaActual,
             posCerradaIzq.y,
             posCerradaIzq.z
         );
 
-        // Mover Puerta Derecha en sentido opuesto (espejo)
         if (sincronizarPuertasEnEspejo && puertaDerecha != null)
         {
             puertaDerecha.localPosition = new Vector3(
@@ -180,7 +204,6 @@ public class ControladorEncendidoHaas : MonoBehaviour
             );
         }
 
-        // 4. Validar Paso 5 (Abrir y volver a cerrar)
         float distRecorrida = Mathf.Abs(aperturaActual);
         if (pasoActual == PasoEncendido.Paso5_CiclarPuertas)
         {
@@ -192,15 +215,65 @@ public class ControladorEncendidoHaas : MonoBehaviour
             else if (puertasFueronAbiertas && distRecorrida <= 0.04f)
             {
                 pasoActual = PasoEncendido.Paso6_ResetAlarmas;
-                ActualizarTextoGuia("Paso 6: Presiona la tecla naranja RESET en el panel de control.");
+                pulsacionesResetActuales = 0;
+                CambiarObjetivoGuia(botonResetRef);
+                ActualizarTextoGuia($"PASO 6:\nPresiona RESET 4 veces para borrar las alarmas.\n({nombresAlarmasHaas[0]})");
             }
         }
     }
 
+    // --- ANIMACIÓN DE TORRETA ROJA, FLECHA 3D Y PARPADEO DE BOTÓN ---
+    private void AnimarAyudasVisualesYTorreta()
+    {
+        // 1. Parpadeo de LuzAlerta y Foco Superior en Rojo (funciona aunque solo asignes LuzAlerta)
+        if (alarmasActivasTorreta)
+        {
+            bool encendido = Mathf.FloorToInt(Time.time * 4f) % 2 == 0;
 
+            if (luzPuntualTorreta != null)
+                luzPuntualTorreta.enabled = encendido;
 
+            if (focoTorretaRenderer != null && focoTorretaRenderer.material != null && focoTorretaRenderer.material.HasProperty("_Color"))
+                focoTorretaRenderer.material.color = encendido ? colorTorretaAlarma : colorOriginalTorreta;
+        }
 
+        // 2. Movimiento flotante de la Flecha Guía y pulso de color en el botón objetivo
+        if (objetivoActualGuia != null)
+        {
+            if (flechaGuia3D != null)
+            {
+                if (!flechaGuia3D.gameObject.activeSelf) flechaGuia3D.gameObject.SetActive(true);
+                Vector3 rebote = Vector3.up * (Mathf.Sin(Time.time * 5f) * 0.03f);
+                flechaGuia3D.position = objetivoActualGuia.position + offsetFlecha + rebote;
+            }
 
+            if (rendererObjetivoActual != null && rendererObjetivoActual.material != null && rendererObjetivoActual.material.HasProperty("_Color"))
+            {
+                float pulso = (Mathf.Sin(Time.time * 6f) + 1f) * 0.5f;
+                rendererObjetivoActual.material.color = Color.Lerp(colorOriginalObjetivo, colorResaltadoBoton, pulso * 0.75f);
+            }
+        }
+        else if (flechaGuia3D != null && flechaGuia3D.gameObject.activeSelf)
+        {
+            flechaGuia3D.gameObject.SetActive(false);
+        }
+    }
+
+    private void CambiarObjetivoGuia(Transform nuevoObjetivo)
+    {
+        if (rendererObjetivoActual != null && rendererObjetivoActual.material != null && rendererObjetivoActual.material.HasProperty("_Color"))
+            rendererObjetivoActual.material.color = colorOriginalObjetivo;
+
+        objetivoActualGuia = nuevoObjetivo;
+        rendererObjetivoActual = null;
+
+        if (nuevoObjetivo != null)
+        {
+            rendererObjetivoActual = nuevoObjetivo.GetComponentInChildren<Renderer>();
+            if (rendererObjetivoActual != null && rendererObjetivoActual.material != null && rendererObjetivoActual.material.HasProperty("_Color"))
+                colorOriginalObjetivo = rendererObjetivoActual.material.color;
+        }
+    }
 
     // --- PASO 1: INTERRUPTOR TRASERO ---
     public void CompletarPaso1_Breaker()
@@ -211,6 +284,7 @@ public class ControladorEncendidoHaas : MonoBehaviour
 
         ReproducirSonido(sonidoBreaker);
         pasoActual = PasoEncendido.Paso2_AbrirValvulaAire;
+        CambiarObjetivoGuia(palancaValvulaAire);
         ActualizarTextoGuia("Paso 2: Gira la llave azul trasera para abrir la presión de aire.");
     }
 
@@ -225,6 +299,7 @@ public class ControladorEncendidoHaas : MonoBehaviour
 
         ReproducirSonido(sonidoAire);
         pasoActual = PasoEncendido.Paso3_BotonPowerOn;
+        CambiarObjetivoGuia(botonPowerOnRef);
         ActualizarTextoGuia("Paso 3: Ve al frente y presiona el botón verde POWER ON.");
     }
 
@@ -235,6 +310,9 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (rendererPantallaCNC != null && matPantallaAlarma != null)
             rendererPantallaCNC.material = matPantallaAlarma;
 
+        // Activar el parpadeo rojo de LuzAlerta al encender la máquina
+        alarmasActivasTorreta = true;
+
         if (audioSource != null && sonidoVentiladorLoop != null)
         {
             audioSource.clip = sonidoVentiladorLoop;
@@ -243,6 +321,7 @@ public class ControladorEncendidoHaas : MonoBehaviour
         }
 
         pasoActual = PasoEncendido.Paso4_LiberarEStop;
+        CambiarObjetivoGuia(botonEStop);
         ActualizarTextoGuia("Paso 4: Libera el botón rojo de Paro de Emergencia (E-STOP).");
     }
 
@@ -253,7 +332,6 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (botonEStop != null)
         {
             Vector3 posFinal = botonEStop.localPosition + new Vector3(0f, -0.015f, 0f);
-            // Rotación RELATIVA: multiplicamos la rotación actual por el ángulo deseado
             Quaternion rotGiro = Quaternion.Euler(0f, 0f, 45f);
             Quaternion rotFinal = botonEStop.localRotation * rotGiro;
 
@@ -261,29 +339,50 @@ public class ControladorEncendidoHaas : MonoBehaviour
         }
 
         pasoActual = PasoEncendido.Paso5_CiclarPuertas;
+        CambiarObjetivoGuia(puertaIzquierda);
         ActualizarTextoGuia("Paso 5: Abre y vuelve a cerrar las puertas de la cabina.");
     }
 
-    // --- PASO 6: BOTÓN RESET ---
+    // --- PASO 6: BOTÓN RESET (Se debe presionar 4 veces para borrar las 4 alarmas) ---
     public void CompletarPaso6_Reset()
     {
         if (pasoActual != PasoEncendido.Paso6_ResetAlarmas) return;
-        if (rendererPantallaCNC != null && matPantallaLista != null)
-            rendererPantallaCNC.material = matPantallaLista;
 
-        pasoActual = PasoEncendido.Paso7_ZeroReturnHome;
-        ActualizarTextoGuia("Paso 7: Presiona POWER UP / RESTART para enviar los ejes a Origen (Home).");
+        ReproducirSonido(sonidoBeepBoton);
+        pulsacionesResetActuales++;
+
+        int restantes = pulsacionesResetNecesarias - pulsacionesResetActuales;
+
+        if (restantes > 0)
+        {
+            int indiceAlarma = Mathf.Clamp(pulsacionesResetActuales, 0, nombresAlarmasHaas.Length - 1);
+            ActualizarTextoGuia($"PASO 6:\nAlarma borrada. Faltan {restantes} pulsaciones de RESET.\n({nombresAlarmasHaas[indiceAlarma]})");
+        }
+        else
+        {
+            alarmasActivasTorreta = false;
+            if (focoTorretaRenderer != null && focoTorretaRenderer.material != null && focoTorretaRenderer.material.HasProperty("_Color"))
+                focoTorretaRenderer.material.color = colorTorretaLista;
+            if (luzPuntualTorreta != null)
+                luzPuntualTorreta.enabled = false;
+
+            if (rendererPantallaCNC != null && matPantallaLista != null)
+                rendererPantallaCNC.material = matPantallaLista;
+
+            pasoActual = PasoEncendido.Paso7_ZeroReturnHome;
+            CambiarObjetivoGuia(botonPowerUpRestartRef);
+            ActualizarTextoGuia("PASO 7:\n¡4 Alarmas borradas! Presiona POWER UP / RESTART para mandar ejes a Origen.");
+        }
     }
 
     // --- PASO 7: MANDAR EJES A ORIGEN + CUBIERTAS TELESCÓPICAS ---
     public void CompletarPaso7_ZeroReturn()
     {
         if (pasoActual != PasoEncendido.Paso7_ZeroReturnHome) return;
+        CambiarObjetivoGuia(null);
         ReproducirSonido(sonidoServosHome);
         StartCoroutine(SecuenciaHomeEjes());
     }
-
-
 
     private IEnumerator SecuenciaHomeEjes()
     {
@@ -292,11 +391,9 @@ public class ControladorEncendidoHaas : MonoBehaviour
         float t = 0f;
 
         Vector3 cabInicio = cabezalEjeZ != null ? cabezalEjeZ.localPosition : Vector3.zero;
-        // En Unity el Cabezal sube en el eje Y (Flecha Verde)
         Vector3 cabFin = posIniCabezal + new Vector3(0f, desplazamientoCabezalHomeY, 0f);
 
         Vector3 mesaInicio = mesaEjeX != null ? mesaEjeX.localPosition : Vector3.zero;
-        // La mesa se mueve a la izquierda (Eje X) y hacia adelante/atrás (Eje Z)
         Vector3 mesaFin = posIniMesa + new Vector3(desplazamientoMesaHomeX, 0f, desplazamientoMesaHomeZ);
 
         while (t < duracion)
@@ -322,10 +419,9 @@ public class ControladorEncendidoHaas : MonoBehaviour
         }
 
         pasoActual = PasoEncendido.MaquinaLista;
-        ActualizarTextoGuia("¡Encendido listo! Máquina Haas VF-2 en Origen.");
+        ActualizarTextoGuia("¡Encendido listo! Máquina Haas VF-2 en Origen lista para cambio de herramienta.");
     }
 
-    // Mueve las placas del cabezal solo en el eje vertical Y (Flecha Verde)
     public void ActualizarCubiertasCabezal(float deltaY)
     {
         if (placasTelescopicasCabezal == null || posIniPlacasCabezal == null) return;
@@ -333,13 +429,11 @@ public class ControladorEncendidoHaas : MonoBehaviour
         for (int i = 0; i < n; i++)
         {
             if (placasTelescopicasCabezal[i] == null) continue;
-            // La placa 0 (arriba) se mueve el 100% con el cabezal; la última (abajo) se mueve 0%
             float peso = (n > 1) ? 1f - ((float)i / (n - 1)) : 1f;
             placasTelescopicasCabezal[i].localPosition = posIniPlacasCabezal[i] + new Vector3(0f, deltaY * peso, 0f);
         }
     }
 
-    // Mueve las placas debajo de la mesa en cascada en el eje Z (Flecha Azul)
     public void ActualizarCubiertasMesa(float deltaZ)
     {
         if (placasInferioresMesa == null || posIniPlacasMesa == null) return;
@@ -347,13 +441,10 @@ public class ControladorEncendidoHaas : MonoBehaviour
         for (int i = 0; i < n; i++)
         {
             if (placasInferioresMesa[i] == null) continue;
-            // La placa superior bajo la mesa se mueve al 100%; la inferior queda fija en la base
             float peso = (n > 1) ? 1f - ((float)i / (n - 1)) : 1f;
             placasInferioresMesa[i].localPosition = posIniPlacasMesa[i] + new Vector3(0f, 0f, deltaZ * peso);
         }
     }
-
-
 
     private IEnumerator RotarSuave(Transform obj, Quaternion rotFinal, float duracion)
     {
@@ -393,10 +484,4 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (textoGuiaUI != null)
             textoGuiaUI.text = mensaje;
     }
-
-
-
-
-
-
 }
