@@ -484,4 +484,19 @@ public class ControladorEncendidoHaas : MonoBehaviour
         if (textoGuiaUI != null)
             textoGuiaUI.text = mensaje;
     }
+
+
+    // Permite que el script del ATC mueva la misma flecha 3D y el brillo de los botones
+    public void CambiarObjetivoGuiaPublico(Transform nuevoObjetivo)
+    {
+        CambiarObjetivoGuia(nuevoObjetivo);
+    }
+
+    // Permite verificar si las puertas están cerradas usando las variables reales de este script
+    public bool EstanPuertasCerradas()
+    {
+        return Mathf.Abs(aperturaActual) <= 0.05f;
+    }
+
+
 }
