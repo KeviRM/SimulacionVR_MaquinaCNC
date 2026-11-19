@@ -20,6 +20,7 @@ public class ControladorEncendidoHaas : MonoBehaviour
     public PasoEncendido pasoActual = PasoEncendido.Paso1_SubirBreakerTrasero;
     public TMP_Text textoGuiaUI;
 
+
     [Header("1-2. Gabinete Trasero (Breaker y Aire)")]
     public Transform palancaMainPower;
     public Transform palancaValvulaAire;
@@ -102,6 +103,9 @@ public class ControladorEncendidoHaas : MonoBehaviour
     public AudioClip sonidoVentiladorLoop;
     public AudioClip sonidoBeepBoton;
     public AudioClip sonidoServosHome;
+
+    private PuntoGuiaVR puntoGuiaActual;
+
 
     private void Start()
     {
@@ -240,11 +244,22 @@ public class ControladorEncendidoHaas : MonoBehaviour
         // 2. Movimiento flotante de la Flecha Guía y pulso de color en el botón objetivo
         if (objetivoActualGuia != null)
         {
+
             if (flechaGuia3D != null)
             {
                 if (!flechaGuia3D.gameObject.activeSelf) flechaGuia3D.gameObject.SetActive(true);
-                Vector3 rebote = Vector3.up * (Mathf.Sin(Time.time * 5f) * 0.03f);
-                flechaGuia3D.position = objetivoActualGuia.position + offsetFlecha + rebote;
+
+                if (puntoGuiaActual != null)
+                {
+                    Vector3 rebote = puntoGuiaActual.ejeReboteMundo.normalized * (Mathf.Sin(Time.time * 5f) * 0.025f);
+                    flechaGuia3D.position = puntoGuiaActual.ObtenerPosicionBase() + rebote;
+                    flechaGuia3D.rotation = puntoGuiaActual.ObtenerRotacion();
+                }
+                else
+                {
+                    Vector3 rebote = Vector3.up * (Mathf.Sin(Time.time * 5f) * 0.03f);
+                    flechaGuia3D.position = objetivoActualGuia.position + offsetFlecha + rebote;
+                }
             }
 
             if (rendererObjetivoActual != null && rendererObjetivoActual.material != null && rendererObjetivoActual.material.HasProperty("_Color"))
@@ -266,9 +281,11 @@ public class ControladorEncendidoHaas : MonoBehaviour
 
         objetivoActualGuia = nuevoObjetivo;
         rendererObjetivoActual = null;
+        puntoGuiaActual = null;
 
         if (nuevoObjetivo != null)
         {
+            puntoGuiaActual = nuevoObjetivo.GetComponent<PuntoGuiaVR>();
             rendererObjetivoActual = nuevoObjetivo.GetComponentInChildren<Renderer>();
             if (rendererObjetivoActual != null && rendererObjetivoActual.material != null && rendererObjetivoActual.material.HasProperty("_Color"))
                 colorOriginalObjetivo = rendererObjetivoActual.material.color;

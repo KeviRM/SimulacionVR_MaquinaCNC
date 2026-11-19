@@ -81,7 +81,11 @@ public class ControladorHandleJogHaas : MonoBehaviour
     {
         if (controladorEncendido != null && controladorEncendido.pasoActual != ControladorEncendidoHaas.PasoEncendido.MaquinaLista)
         {
-            MostrarMensaje("ALERTA JOG:\nPrimero completa el encendido y envía la máquina a Origen (Home).");
+
+            if (GestorSeminarioVR.Instancia != null)
+                GestorSeminarioVR.Instancia.MostrarAlertaTemporal("ALERTA JOG:\nPrimero completa el encendido y envía la máquina a Origen (Home).");
+            else
+                MostrarMensaje("ALERTA JOG:\nPrimero completa el encendido y envía la máquina a Origen (Home).");
             return;
         }
 

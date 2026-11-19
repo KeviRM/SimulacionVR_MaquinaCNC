@@ -594,7 +594,10 @@ public class ControladorATCHaas : MonoBehaviour
         if (!exigirEncendidoCompleto || controladorEncendido == null) return true;
         if (controladorEncendido.pasoActual != ControladorEncendidoHaas.PasoEncendido.MaquinaLista)
         {
-            MostrarMensaje("ALERTA:\nPrimero debes terminar los 7 pasos de encendido de la máquina.");
+            if (GestorSeminarioVR.Instancia != null)
+                GestorSeminarioVR.Instancia.MostrarAlertaTemporal("ALERTA DE SEGURIDAD:\nPrimero debes completar los 7 pasos de encendido de la máquina.");
+            else
+                MostrarMensaje("ALERTA:\nPrimero debes terminar los 7 pasos de encendido de la máquina.");
             return false;
         }
         return true;
